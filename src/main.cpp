@@ -9,7 +9,7 @@ RTC_DS1307 rtc;
 #define INPUT_PIN 33
 #define RS485_EN 34
 
-HardwareSerial RS485Serial(1);
+HardwareSerial RS485Serial(1);  //Khai báo RS485 sử dụng UART1
 
 unsigned long startTime = 0;
 unsigned long currentTime = 0;
@@ -36,21 +36,23 @@ void setup() {
   digitalWrite(LED, HIGH);
   digitalWrite(BUZZER, LOW);
 
-  Wire.begin(8, 9);
+  Wire.begin(8, 9); //SDA, SCL
 
+  //Khởi tạo RTC
   if(!rtc.begin()){
     Serial.println("Không tìm thấy DS1307");
     while(1);
   }
 
+  //Nếu RTC chưa chạy thì lấy thời gian theo máy tính
   if(!rtc.isrunning()){
     rtc.adjust(DateTime(F(__DATE__), F(__TIME__)));
   }
 
   pinMode(RS485_EN, OUTPUT);
-  digitalWrite(RS485_EN, LOW);
+  digitalWrite(RS485_EN, LOW);  //Chế độ nhận
 
-  RS485Serial.begin(9600, SERIAL_8N1, 18, 17);
+  RS485Serial.begin(9600, SERIAL_8N1, 18, 17);  //RX=18, TX=17
 }
 
 void loop() {
@@ -93,13 +95,13 @@ void Real_Time(){
   unsigned long nowMillis = millis();
   if(nowMillis - lastSend >= 1000){
     lastSend = nowMillis;
-    DateTime now = rtc.now();
+    DateTime now = rtc.now(); //Lấy thời gian từ RTC
     char data[30];
     sprintf(data, "%02d:%02d:%02d %02d/%02d/%04d", now.hour(), now.minute(), now.second(), now.day(), now.month(), now.year());
-    digitalWrite(RS485_EN, HIGH);
-    RS485Serial.println(data);
+    digitalWrite(RS485_EN, HIGH); //Bật chế độ gửi
+    RS485Serial.println(data);  //Gửi dữ liệu data đến RS485
     delay(10);
-    digitalWrite(RS485_EN, LOW);
+    digitalWrite(RS485_EN, LOW);  //Quay về chế độ nhận
     Serial.println(data);
   }
 }
