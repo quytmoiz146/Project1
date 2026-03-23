@@ -41,7 +41,6 @@ void setup() {
   //Khởi tạo RTC
   if(!rtc.begin()){
     Serial.println("Không tìm thấy DS1307");
-    while(1);
   }
 
   //Nếu RTC chưa chạy thì lấy thời gian theo máy tính
