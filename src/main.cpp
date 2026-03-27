@@ -1,9 +1,11 @@
 #include <Arduino.h>
 #include <RTClib.h>
 #include <Wire.h>
+#include <Wifi.h>
 
 RTC_DS1307 rtc;
 
+#define LED_WIFI 41
 #define LED 42
 #define BUZZER 39
 #define INPUT_PIN 33
@@ -23,16 +25,43 @@ bool currentInputState = 0;
 bool lastInputState = 0;
 bool active = false;
 
+const char *ssid = "HoangMinhTom";
+const char *password = "01225250303";
+
 void Led_Buzzer();
 void Real_Time();
 
+void initWifi(){
+    WiFi.mode(WIFI_STA);
+    WiFi.setAutoReconnect(true);
+    // WiFi.persistent(true);
+    Serial.print("Connecting to Wifi ");
+    Serial.println(ssid);
+    delay(500);
+    WiFi.begin(ssid, password);
+    while (WiFi.status() != WL_CONNECTED)
+    {
+      Serial.print("Status: ");
+      Serial.println(WiFi.status());
+      delay(1000);
+    }
+    digitalWrite(LED_WIFI, LOW);
+    Serial.println("Connected!");
+    Serial.print("IP: ");
+    Serial.println(WiFi.localIP());
+}
+
 void setup() {
   Serial.begin(9600);
+  delay(2000);
+
+  initWifi();
 
   pinMode(INPUT_PIN, INPUT);
   pinMode(LED, OUTPUT);
   pinMode(BUZZER, OUTPUT);
 
+  digitalWrite(LED_WIFI, HIGH);
   digitalWrite(LED, HIGH);
   digitalWrite(BUZZER, LOW);
 
@@ -57,6 +86,10 @@ void setup() {
 void loop() {
   Led_Buzzer();
   Real_Time();
+
+  Serial.print("RSSI: ");
+  Serial.println(WiFi.RSSI());
+  delay(1000);
 }
 
 void Led_Buzzer(){
@@ -101,6 +134,6 @@ void Real_Time(){
     RS485Serial.println(data);  //Gửi dữ liệu data đến RS485
     delay(10);
     digitalWrite(RS485_EN, LOW);  //Quay về chế độ nhận
-    Serial.println(data);
+    // Serial.println(data);
   }
 }
