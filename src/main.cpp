@@ -1,9 +1,12 @@
 #include <Arduino.h>
 #include <RTClib.h>
 #include <Wire.h>
+#include <Preferences.h>
 #include <WiFi.h>
 
 RTC_DS1307 rtc;
+
+Preferences prefs;
 
 #define LED 42
 #define BUZZER 39
@@ -17,6 +20,7 @@ unsigned long currentTime = 0;
 unsigned long lastLedTime = 0;
 unsigned long lastBuzzerTime = 0;
 unsigned long lastSend = 0;
+unsigned long lastSave = 0;
 
 bool ledState = 1;
 bool buzzerState = 0;
@@ -29,25 +33,9 @@ const char *password = "amz123456";
 
 void Led_Buzzer();
 void Real_Time();
+void initWifi();
+void Save_Time_To_Flash();
 
-void initWifi(){
-    WiFi.mode(WIFI_STA);
-    WiFi.setAutoReconnect(true);
-    WiFi.persistent(true);
-    Serial.print("Connecting to Wifi ");
-    Serial.println(ssid);
-    delay(500);
-    WiFi.begin(ssid, password);
-    while (WiFi.status() != WL_CONNECTED)
-    {
-      Serial.print("Status: ");
-      Serial.println(WiFi.status());
-      delay(1000);
-    }
-    Serial.println("Connected!");
-    Serial.print("IP: ");
-    Serial.println(WiFi.localIP());
-}
 
 void setup() {
   Serial.begin(9600);
@@ -78,11 +66,14 @@ void setup() {
   digitalWrite(RS485_EN, LOW);  //Chế độ nhận
 
   RS485Serial.begin(9600, SERIAL_8N1, 18, 17);  //RX=18, TX=17
+
+  prefs.begin("rtc_data", false);
 }
 
 void loop() {
   Led_Buzzer();
   Real_Time();
+  Save_Time_To_Flash();
 
   // Quét wifi xung quanh
   // int n = WiFi.scanNetworks();
@@ -145,5 +136,35 @@ void Real_Time(){
     delay(10);
     digitalWrite(RS485_EN, LOW);  //Quay về chế độ nhận
     Serial.println(data);
+  }
+}
+
+void initWifi(){
+    WiFi.mode(WIFI_STA);
+    WiFi.setAutoReconnect(true);
+    WiFi.persistent(true);
+    Serial.print("Connecting to Wifi ");
+    Serial.println(ssid);
+    delay(500);
+    WiFi.begin(ssid, password);
+    while (WiFi.status() != WL_CONNECTED)
+    {
+      Serial.print("Status: ");
+      Serial.println(WiFi.status());
+      delay(1000);
+    }
+    Serial.println("Connected!");
+    Serial.print("IP: ");
+    Serial.println(WiFi.localIP());
+}
+
+void Save_Time_To_Flash(){
+  unsigned long nowMillis = millis();
+  if(nowMillis - lastSave >= 60000){
+    lastSave = nowMillis;
+    DateTime now = rtc.now(); //Lấy thời gian từ rtc
+    char data[30];
+    sprintf(data, "%02d:%02d:%02d %02d/%02d/%04d", now.hour(), now.minute(), now.second(), now.day(), now.month(), now.year());
+    prefs.putString("time", data);  //Lưu thời gian vào flash
   }
 }
