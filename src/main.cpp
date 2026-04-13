@@ -1,47 +1,170 @@
-#include <Arduino.h>
 #include <RTClib.h>
 #include <Wire.h>
 #include <Preferences.h>
-#include <WiFi.h>
-
-RTC_DS1307 rtc;
-
-Preferences prefs;
+#include <WiFiClientSecure.h>
+#include <PubSubClient.h>
 
 #define LED 42
 #define BUZZER 39
 #define INPUT_PIN 33
 #define RS485_EN 34
 
+String ssid = "HoangMinhTom";
+String password = "01225250303";
+
+const char* mqtt_server = "1ec955b8f9784f91afb6532b88936962.s1.eu.hivemq.cloud";
+const int mqtt_port = 8883;
+const char* mqtt_username = "quyet";
+const char* mqtt_password = "Quyt1406";
+
+RTC_DS1307 rtc; //Khai báo DS1307
+Preferences prefsRTC; //Khai báo thư viện cho DS1307
+WiFiClientSecure espClient; //Khai báo đối tượng mạng TCP
+PubSubClient client(espClient); //Khai báo đối tượng MQTT
 HardwareSerial RS485Serial(1);  //Khai báo RS485 sử dụng UART1
 
-unsigned long startTime = 0;
-unsigned long currentTime = 0;
-unsigned long lastLedTime = 0;
-unsigned long lastBuzzerTime = 0;
-unsigned long lastSend = 0;
-unsigned long lastSave = 0;
+void initWifi(){
+  unsigned long t_start = millis();
+  int retryCount = 0;
+  WiFi.mode(WIFI_STA);
+  WiFi.setAutoReconnect(true);
+  WiFi.persistent(true);
+  Serial.print("Connecting to Wifi ");
+  Serial.println(ssid);
+  delay(500);
+  WiFi.begin(ssid.c_str(), password.c_str());
+  while (WiFi.status() != WL_CONNECTED)
+  {
+    Serial.print("Status: ");
+    Serial.println(WiFi.status());
+    delay(500);
 
-bool ledState = 1;
-bool buzzerState = 0;
-bool currentInputState = 0;
-bool lastInputState = 0;
-bool active = false;
+    if(millis() - t_start >= 5000){
+      retryCount++;
+      WiFi.disconnect(true);
+      WiFi.begin(ssid.c_str(), password.c_str());
+    }
 
-const char *ssid = "AMZ2025";
-const char *password = "amz123456";
+    if(retryCount >= 5){
+      Serial.println("Reset ESP");
+      ESP.restart();
+    }
+  }
+  randomSeed(micros());
+  Serial.println("Connected!");
+  Serial.print("IP: ");
+  Serial.println(WiFi.localIP());
+}
 
-void Led_Buzzer();
-void Real_Time();
-void initWifi();
-void Save_Time_To_Flash();
+void Led_Buzzer(){
+  static unsigned long t_start = 0;
+  static unsigned long t_current = 0;
+  static unsigned long t_lastLed = 0;
+  static unsigned long t_lastBuzzer = 0;
+  static bool ledState = 1;
+  static bool buzzerState = 0;
+  static bool currentInputState = 0;
+  static bool lastInputState = 0;
+  static bool active = false;
 
+  currentInputState = digitalRead(INPUT_PIN);
+  if(currentInputState != lastInputState){
+    active = true;
+    t_start = millis();
+  }
+  lastInputState = currentInputState;
+
+  if(active){
+    t_current = millis();
+    if(t_current - t_start >= 30000){
+      active = false;
+      digitalWrite(LED, HIGH);
+      digitalWrite(BUZZER, LOW);
+      return;
+    }
+
+    if(t_current - t_lastBuzzer >= 1000){
+      t_lastBuzzer = t_current;
+      buzzerState = !buzzerState;
+      digitalWrite(BUZZER, buzzerState);
+    }
+
+    if(t_current - t_lastLed >= 500){
+      t_lastLed = t_current;
+      ledState = !ledState;
+      digitalWrite(LED, ledState);
+    }
+  }
+}
+
+void Real_Time(){
+  static unsigned long t_lastSend = 0;
+  unsigned long nowMillis = millis();
+  if(nowMillis - t_lastSend >= 1000){
+    t_lastSend = nowMillis;
+    DateTime now = rtc.now(); //Lấy thời gian từ RTC
+    char data[30];
+    sprintf(data, "%02d:%02d:%02d %02d/%02d/%04d", now.hour(), now.minute(), now.second(), now.day(), now.month(), now.year());
+    digitalWrite(RS485_EN, HIGH); //Bật chế độ gửi
+    RS485Serial.println(data);  //Gửi dữ liệu data đến RS485
+    delay(10);
+    digitalWrite(RS485_EN, LOW);  //Quay về chế độ nhận
+    // Serial.println(data);
+  }
+}
+
+void Save_Time_To_Flash(){
+  static unsigned long t_lastSave = 0;
+  unsigned long nowMillis = millis();
+  if(nowMillis - t_lastSave >= 60000){
+    t_lastSave = nowMillis;
+    DateTime now = rtc.now(); //Lấy thời gian từ rtc
+    char data[30];
+    sprintf(data, "%02d:%02d:%02d %02d/%02d/%04d", now.hour(), now.minute(), now.second(), now.day(), now.month(), now.year());
+    prefsRTC.putString("time", data);  //Lưu thời gian vào flash
+  }
+}
+
+void callback(char* topic, byte* payload, unsigned int length){
+  Serial.print("Nhận dữ liệu từ topic: ");
+  Serial.println(topic);
+
+  String msg = "";
+  for (int i = 0; i < length; i++){
+    msg += (char)payload[i];
+  }
+  Serial.print("Nội dung: ");
+  Serial.println(msg);
+
+  if (msg == "ON"){
+    digitalWrite(LED, LOW);
+  } else if (msg == "OFF"){
+    digitalWrite(LED, HIGH);
+  }
+}
+
+void reconnect(){
+  while (!client.connected()){
+    Serial.print("Đang kết nối MQTT . . . ");
+    String clientID = "ESPClient-";
+    clientID += String(random(0xffff), HEX);
+    if (client.connect(clientID.c_str(), mqtt_username, mqtt_password)){
+      Serial.println("Connected!");
+      client.subscribe("esp32/control");
+    } else {
+      Serial.print("falled, rc=");
+      Serial.print(client.state());
+      Serial.println(" try again in 5 seconds");
+      delay(5000);
+    }
+  }
+}
 
 void setup() {
-  Serial.begin(9600);
-  delay(2000);
+  Serial.begin(115200);
+  delay(1000);
 
-  initWifi();
+  initWifi(); //Kết nối WiFi
 
   pinMode(INPUT_PIN, INPUT);
   pinMode(LED, OUTPUT);
@@ -67,7 +190,11 @@ void setup() {
 
   RS485Serial.begin(9600, SERIAL_8N1, 18, 17);  //RX=18, TX=17
 
-  prefs.begin("rtc_data", false);
+  prefsRTC.begin("rtc_data", false);
+
+  espClient.setInsecure();
+  client.setServer(mqtt_server, mqtt_port);
+  client.setCallback(callback);
 }
 
 void loop() {
@@ -88,83 +215,20 @@ void loop() {
   // }
   // delay(5000);
 
-  Serial.print("RSSI: ");
-  Serial.println(WiFi.RSSI());
-  delay(1000);
-}
+  // Serial.print("RSSI: ");
+  // Serial.println(WiFi.RSSI());
+  // delay(1000);
 
-void Led_Buzzer(){
-  currentInputState = digitalRead(INPUT_PIN);
-  if(currentInputState != lastInputState){
-    active = true;
-    startTime = millis();
+  if(!client.connected()){
+    reconnect();
   }
-  lastInputState = currentInputState;
+  client.loop();
 
-  if(active){
-    currentTime = millis();
-    if(currentTime - startTime >= 30000){
-      active = false;
-      digitalWrite(LED, HIGH);
-      digitalWrite(BUZZER, LOW);
-      return;
-    }
-
-    if(currentTime - lastBuzzerTime >= 1000){
-      lastBuzzerTime = currentTime;
-      buzzerState = !buzzerState;
-      digitalWrite(BUZZER, buzzerState);
-    }
-
-    if(currentTime - lastLedTime >= 500){
-      lastLedTime = currentTime;
-      ledState = !ledState;
-      digitalWrite(LED, ledState);
-    }
-  }
-}
-
-void Real_Time(){
-  unsigned long nowMillis = millis();
-  if(nowMillis - lastSend >= 1000){
-    lastSend = nowMillis;
-    DateTime now = rtc.now(); //Lấy thời gian từ RTC
-    char data[30];
-    sprintf(data, "%02d:%02d:%02d %02d/%02d/%04d", now.hour(), now.minute(), now.second(), now.day(), now.month(), now.year());
-    digitalWrite(RS485_EN, HIGH); //Bật chế độ gửi
-    RS485Serial.println(data);  //Gửi dữ liệu data đến RS485
-    delay(10);
-    digitalWrite(RS485_EN, LOW);  //Quay về chế độ nhận
-    Serial.println(data);
-  }
-}
-
-void initWifi(){
-    WiFi.mode(WIFI_STA);
-    WiFi.setAutoReconnect(true);
-    WiFi.persistent(true);
-    Serial.print("Connecting to Wifi ");
-    Serial.println(ssid);
-    delay(500);
-    WiFi.begin(ssid, password);
-    while (WiFi.status() != WL_CONNECTED)
-    {
-      Serial.print("Status: ");
-      Serial.println(WiFi.status());
-      delay(1000);
-    }
-    Serial.println("Connected!");
-    Serial.print("IP: ");
-    Serial.println(WiFi.localIP());
-}
-
-void Save_Time_To_Flash(){
-  unsigned long nowMillis = millis();
-  if(nowMillis - lastSave >= 60000){
-    lastSave = nowMillis;
-    DateTime now = rtc.now(); //Lấy thời gian từ rtc
-    char data[30];
-    sprintf(data, "%02d:%02d:%02d %02d/%02d/%04d", now.hour(), now.minute(), now.second(), now.day(), now.month(), now.year());
-    prefs.putString("time", data);  //Lưu thời gian vào flash
+  static unsigned long t_lastmsg = 0;
+  if (millis() - t_lastmsg >= 10000){
+    t_lastmsg = millis();
+    String data = prefsRTC.getString("time", "");
+    client.publish("esp32/data", data.c_str());
+    Serial.println("Đã gửi: " + data);
   }
 }
