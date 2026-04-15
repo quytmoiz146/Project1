@@ -1,16 +1,17 @@
 #include <RTClib.h>
 #include <Wire.h>
 #include <Preferences.h>
+#include <WiFi.h>
 #include <WiFiClientSecure.h>
 #include <PubSubClient.h>
 
-#define LED 42
+#define LED 41
 #define BUZZER 39
 #define INPUT_PIN 33
 #define RS485_EN 34
 
-String ssid = "HoangMinhTom";
-String password = "01225250303";
+String ssid = "iPhone_Quyet";
+String password = "14062005";
 
 const char* mqtt_server = "1ec955b8f9784f91afb6532b88936962.s1.eu.hivemq.cloud";
 const int mqtt_port = 8883;
@@ -23,7 +24,7 @@ WiFiClientSecure espClient; //Khai báo đối tượng mạng TCP
 PubSubClient client(espClient); //Khai báo đối tượng MQTT
 HardwareSerial RS485Serial(1);  //Khai báo RS485 sử dụng UART1
 
-void initWifi(){
+void initWiFi(){
   unsigned long t_start = millis();
   int retryCount = 0;
   WiFi.mode(WIFI_STA);
@@ -38,22 +39,20 @@ void initWifi(){
     Serial.print("Status: ");
     Serial.println(WiFi.status());
     delay(500);
-
-    if(millis() - t_start >= 5000){
-      retryCount++;
-      WiFi.disconnect(true);
-      WiFi.begin(ssid.c_str(), password.c_str());
-    }
-
-    if(retryCount >= 5){
-      Serial.println("Reset ESP");
-      ESP.restart();
-    }
   }
   randomSeed(micros());
   Serial.println("Connected!");
   Serial.print("IP: ");
   Serial.println(WiFi.localIP());
+}
+
+void changeWiFi(String newSSID, String newPASS){
+  Serial.println("Thay đổi kết nối WiFi!");
+  ssid = newSSID;
+  password = newPASS;
+  WiFi.disconnect(true);
+  delay(1000);
+  initWiFi();
 }
 
 void Led_Buzzer(){
@@ -116,7 +115,7 @@ void Real_Time(){
 void Save_Time_To_Flash(){
   static unsigned long t_lastSave = 0;
   unsigned long nowMillis = millis();
-  if(nowMillis - t_lastSave >= 60000){
+  if(nowMillis - t_lastSave >= 10000){
     t_lastSave = nowMillis;
     DateTime now = rtc.now(); //Lấy thời gian từ rtc
     char data[30];
@@ -141,6 +140,20 @@ void callback(char* topic, byte* payload, unsigned int length){
   } else if (msg == "OFF"){
     digitalWrite(LED, HIGH);
   }
+
+  if (msg.startsWith("WIFI:")) {
+    int index = msg.indexOf(',');
+
+    if (index > 5) {
+      String newSSID = msg.substring(5, index);
+      String newPASS = msg.substring(index + 1);
+
+      Serial.println("SSID mới: " + newSSID);
+      Serial.println("PASS mới: " + newPASS);
+
+      changeWiFi(newSSID, newPASS);
+    }
+  }
 }
 
 void reconnect(){
@@ -164,7 +177,7 @@ void setup() {
   Serial.begin(115200);
   delay(1000);
 
-  initWifi(); //Kết nối WiFi
+  initWiFi(); //Kết nối WiFi
 
   pinMode(INPUT_PIN, INPUT);
   pinMode(LED, OUTPUT);
@@ -227,8 +240,8 @@ void loop() {
   static unsigned long t_lastmsg = 0;
   if (millis() - t_lastmsg >= 10000){
     t_lastmsg = millis();
-    String data = prefsRTC.getString("time", "");
-    client.publish("esp32/data", data.c_str());
-    Serial.println("Đã gửi: " + data);
+    String time = prefsRTC.getString("time", "");
+    client.publish("esp32/data", time.c_str());
+    Serial.println("Đã gửi: " + time);
   }
 }
